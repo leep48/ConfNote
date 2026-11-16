@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ConfNote — Gemma 4 Audio & Keyword Note Compiler</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    .prose h1, .prose h2, .prose h3 { color: #f8fafc; font-weight: 700; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+    .prose h2 { font-size: 1.25rem; border-bottom: 1px solid #334155; padding-bottom: 0.25rem; }
+    .prose h3 { font-size: 1.05rem; color: #38bdf8; }
+    .prose p { margin-bottom: 0.75rem; color: #cbd5e1; line-height: 1.6; }
+    .prose ul, .prose ol { margin-left: 1.25rem; margin-bottom: 0.75rem; color: #cbd5e1; list-style-type: disc; }
+    .prose li { margin-bottom: 0.25rem; }
+    .prose strong { color: #f1f5f9; }
+    .prose code { background: #1e293b; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.875em; color: #7dd3fc; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
+  <div class="max-w-5xl mx-auto px-4 py-8 space-y-6">
+    <!-- Header & API Key -->
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-5">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+          <span class="inline-block w-3 h-3 rounded-full bg-sky-400"></span>
+          ConfNote <span class="text-xs font-medium px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">Gemma 4</span>
+        </h1>
+        <p class="text-sm text-slate-400 mt-1">Record the talk, jot down keywords you care about, and let Gemma 4 compile deep-dive notes.</p>
+      </div>
+
+      <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+        <input
+          id="apiKeyInput"
+          type="password"
+          placeholder="Paste Gemini API Key..."
+          class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 w-full sm:w-60"
+        />
+        <select
+          id="modelSelect"
+          class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500"
+        >
+          <option value="gemma-4-31b-it">gemma-4-31b-it (Best Notes)</option>
+          <option value="gemma-4-26b-a4b-it">gemma-4-26b-a4b-it (Fast MoE)</option>
+          <option value="gemma-4-4b-it">gemma-4-4b-it (Native Audio)</option>
+        </select>
+      </div>
+    </header>
+
+    <!-- Main 2-Column Workspace -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <!-- Left: Recording & Transcript -->
+      <section class="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <button
+              id="recordBtn"
+              class="px-4 py-2 rounded-lg font-medium text-sm bg-rose-600 hover:bg-rose-500 text-white transition flex items-center gap-2 cursor-pointer"
+            >
+              <span id="recordDot" class="w-2.5 h-2.5 rounded-full bg-white"></span>
+              <span id="recordLabel">Start Recording</span>
+            </button>
+            <span id="timerDisplay" class="font-mono text-sm text-slate-300 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">00:00</span>
+          </div>
+
+          <button
+            id="demoBtn"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer"
+          >
+            Load Demo Talk
+          </button>
+        </div>
+
+        <p id="speechStatus" class="text-xs text-slate-400">
+          Ready. Click Start Recording to capture audio + live transcript (Chrome/Edge recommended for live speech-to-text).
+        </p>
+
+        <audio id="audioPlayback" controls class="w-full hidden"></audio>
+
+        <div class="flex flex-col flex-1">
+          <label for="transcriptBox" class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+            Talk Transcript (Editable)
+          </label>
+          <textarea
+            id="transcriptBox"
+            rows="12"
+            placeholder="Live transcript will appear here as the speaker talks... You can also paste or edit text directly."
+            class="w-full flex-1 bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500 resize-y leading-relaxed"
+          ></textarea>
+        </div>
+      </section>
+
+      <!-- Right: Keyword Logger -->
+      <section class="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
+        <div>
+          <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-300">Your Keywords of Interest</h2>
+          <p class="text-xs text-slate-400 mt-1">Type a topic or term you want explained or saved, and press <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-slate-300">Enter</kbd>.</p>
+        </div>
+
+        <form id="keywordForm" class="flex gap-2">
+          <input
+            id="keywordInput"
+            type="text"
+            placeholder="e.g., LoRA, KV cache, attention sink..."
+            class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
+          />
+          <button
+            type="submit"
+            class="px-4 py-2 rounded-lg text-sm font-medium bg-sky-600 hover:bg-sky-500 text-white transition cursor-pointer"
+          >
+            Add
+          </button>
+        </form>
+
+        <div id="keywordList" class="flex-1 bg-slate-950/60 border border-slate-800/80 rounded-lg p-3 space-y-2 overflow-y-auto max-h-72 min-h-[12rem]">
+          <p id="emptyKeywordsMsg" class="text-xs text-slate-500 text-center py-8">No keywords added yet.</p>
+        </div>
+
+        <div class="pt-2 border-t border-slate-800 space-y-2">
+          <label id="audioUploadOption" class="hidden items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input id="sendAudioCheckbox" type="checkbox" class="rounded bg-slate-800 border-slate-600 text-sky-500" checked />
+            Also send recorded audio to Gemma 4 (4B native audio)
+          </label>
+          <button
+            id="compileBtn"
+            class="w-full py-2.5 px-4 rounded-lg font-semibold text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition cursor-pointer"
+          >
+            Compile Notes with Gemma 4
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Compiled Notes Output -->
+    <section id="outputSection" class="hidden bg-slate-900/70 border border-slate-800 rounded-xl p-6 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h2 class="text-lg font-bold text-white">Compiled Conference Notes</h2>
+        <button
+          id="copyNotesBtn"
+          class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
+        >
+          Copy Markdown
+        </button>
+      </div>
+      <div id="notesOutput" class="prose max-w-none"></div>
+    </section>
+  </div>
+
+  <script>
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const modelSelect = document.getElementById('modelSelect');
+    const recordBtn = document.getElementById('recordBtn');
+    const recordDot = document.getElementById('recordDot');
+    const recordLabel = document.getElementById('recordLabel');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const speechStatus = document.getElementById('speechStatus');
+    const audioPlayback = document.getElementById('audioPlayback');
+    const transcriptBox = document.getElementById('transcriptBox');
+    const keywordForm = document.getElementById('keywordForm');
+    const keywordInput = document.getElementById('keywordInput');
+    const keywordList = document.getElementById('keywordList');
+    const emptyKeywordsMsg = document.getElementById('emptyKeywordsMsg');
+    const compileBtn = document.getElementById('compileBtn');
+    const demoBtn = document.getElementById('demoBtn');
+    const outputSection = document.getElementById('outputSection');
+    const notesOutput = document.getElementById('notesOutput');
+    const copyNotesBtn = document.getElementById('copyNotesBtn');
+    const audioUploadOption = document.getElementById('audioUploadOption');
+    const sendAudioCheckbox = document.getElementById('sendAudioCheckbox');
+
+    const isServerMode = window.location.protocol.startsWith('http');
+    if (isServerMode) {
+      apiKeyInput.placeholder = 'Optional API Key (uses .env)';
+    }
+
+    // Load saved API key from browser storage (never hardcoded)
+    apiKeyInput.value = localStorage.getItem('gemma4_api_key') || '';
+    apiKeyInput.addEventListener('input', () => {
+      localStorage.setItem('gemma4_api_key', apiKeyInput.value.trim());
+    });
+
+    let isRecording = false;
+    let startTime = null;
+    let timerInterval = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let recordedAudioBlob = null;
+    let recognition = null;
+    let keywords = [];
+    let lastCompiledMarkdown = '';
+
+    function formatTime(ms) {
+      const totalSec = Math.floor(ms / 1000);
+      const mins = String(Math.floor(totalSec / 60)).padStart(2, '0');
+      const secs = String(totalSec % 60).padStart(2, '0');
+      return `${mins}:${secs}`;
+    }
+
+    function currentTimestamp() {
+      if (!isRecording || !startTime) return 'Note';
+      return formatTime(Date.now() - startTime);
+    }
+
+    function updateAudioCheckboxVisibility() {
+      if (recordedAudioBlob && modelSelect.value === 'gemma-4-4b-it') {
+        audioUploadOption.classList.remove('hidden');
+        audioUploadOption.classList.add('flex');
+      } else {
+        audioUploadOption.classList.add('hidden');
+        audioUploadOption.classList.remove('flex');
+      }
+    }
+    modelSelect.addEventListener('change', updateAudioCheckboxVisibility);
+
+    function renderKeywords() {
+      keywordList.innerHTML = '';
+      if (keywords.length === 0) {
+        keywordList.appendChild(emptyKeywordsMsg);
+        return;
+      }
+      keywords.forEach((kw, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm';
+        row.innerHTML = `
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="font-mono text-xs px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 shrink-0">${kw.time}</span>
+            <span class="text-slate-100 truncate">${escapeHtml(kw.text)}</span>
+          </div>
+          <button data-idx="${idx}" class="text-slate-500 hover:text-rose-400 text-xs ml-2 cursor-pointer">✕</button>
+        `;
+        row.querySelector('button').addEventListener('click', () => {
+          keywords.splice(idx, 1);
+          renderKeywords();
+        });
+        keywordList.appendChild(row);
+      });
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
+
+    keywordForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = keywordInput.value.trim();
+      if (!text) return;
+      keywords.push({ text, time: currentTimestamp() });
+      keywordInput.value = '';
+      renderKeywords();
+    });
+
+    async function startRecording() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        recordedAudioBlob = null;
+        audioPlayback.classList.add('hidden');
+
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunks.push(e.data);
+        };
+        mediaRecorder.onstop = () => {
+          recordedAudioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+          audioPlayback.src = URL.createObjectURL(recordedAudioBlob);
+          audioPlayback.classList.remove('hidden');
+          stream.getTracks().forEach(t => t.stop());
+          updateAudioCheckboxVisibility();
+        };
+        mediaRecorder.start(1000);
+
+        // Live SpeechRecognition (if supported)
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = false;
+          recognition.lang = 'en-US';
+          recognition.onresult = (event) => {
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              if (event.results[i].isFinal) {
+                const line = `[${currentTimestamp()}] ${event.results[i][0].transcript.trim()}\n`;
+                transcriptBox.value += line;
+                transcriptBox.scrollTop = transcriptBox.scrollHeight;
+              }
+            }
+          };
+          recognition.onerror = (e) => {
+            speechStatus.textContent = `Speech-to-text notice: ${e.error}. Audio is still recording.`;
+          };
+          recognition.onend = () => {
+            if (isRecording) {
+              try { recognition.start(); } catch (_) {}
+            }
+          };
+          recognition.start();
+          speechStatus.textContent = 'Recording audio + live transcribing... Jot down keywords on the right!';
+        } else {
+          speechStatus.textContent = 'Recording audio (live speech-to-text not supported in this browser; use gemma-4-4b-it or paste transcript).';
+        }
+
+        isRecording = true;
+        startTime = Date.now();
+        timerDisplay.textContent = '00:00';
+        timerInterval = setInterval(() => {
+          timerDisplay.textContent = formatTime(Date.now() - startTime);
+        }, 500);
+
+        recordBtn.classList.replace('bg-rose-600', 'bg-slate-700');
+        recordBtn.classList.replace('hover:bg-rose-500', 'hover:bg-slate-600');
+        recordDot.classList.add('animate-pulse', 'bg-rose-400');
+        recordLabel.textContent = 'Stop Recording';
+      } catch (err) {
+        alert('Could not access microphone: ' + err.message);
+      }
+    }
+
+    function stopRecording() {
+      isRecording = false;
+      clearInterval(timerInterval);
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      if (recognition) {
+        try { recognition.stop(); } catch (_) {}
+      }
+      recordBtn.classList.replace('bg-slate-700', 'bg-rose-600');
+      recordBtn.classList.replace('hover:bg-slate-600', 'hover:bg-rose-500');
+      recordDot.classList.remove('animate-pulse', 'bg-rose-400');
+      recordLabel.textContent = 'Start Recording';
+      speechStatus.textContent = 'Recording stopped. Add any final keywords and click Compile Notes with Gemma 4.';
+    }
+
+    recordBtn.addEventListener('click', () => {
+      if (isRecording) stopRecording();
+      else startRecording();
+    });
+
+    demoBtn.addEventListener('click', () => {
+      transcriptBox.value =
+`[00:12] Welcome everyone to this session on scaling edge AI and multimodal transformers.
+[00:45] One of the biggest bottlenecks in deploying long-context models on laptops is the KV cache memory footprint during autoregressive decoding.
+[01:30] To solve this, we can use grouped-query attention and quantization, or look at encoder-free multimodal architectures that map audio and vision directly via linear projections.
+[02:20] Another trick when fine-tuning for domain-specific conference tasks is LoRA, which keeps base weights frozen and trains low-rank adapter matrices.
+[03:05] Finally, speculative decoding lets a smaller draft model propose tokens that a larger verifier model checks in parallel, cutting latency in half.`;
+
+      keywords = [
+        { time: '00:45', text: 'KV cache' },
+        { time: '01:30', text: 'encoder-free multimodal' },
+        { time: '02:20', text: 'LoRA' },
+        { time: '03:05', text: 'speculative decoding' }
+      ];
+      renderKeywords();
+      speechStatus.textContent = 'Demo talk & keywords loaded! Enter your API key and click Compile Notes with Gemma 4.';
+    });
+
+    function blobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    compileBtn.addEventListener('click', async () => {
+      const apiKey = apiKeyInput.value.trim();
+      if (!isServerMode && !apiKey) {
+        alert('Please paste your Gemini API key at the top right first (or run python3 server.py to use .env).');
+        apiKeyInput.focus();
+        return;
+      }
+
+      const transcript = transcriptBox.value.trim();
+      const useAudio = recordedAudioBlob && modelSelect.value === 'gemma-4-4b-it' && sendAudioCheckbox.checked;
+
+      if (!transcript && !useAudio) {
+        alert('Please record a talk, paste a transcript, or click "Load Demo Talk" first.');
+        return;
+      }
+
+      if (keywords.length === 0) {
+        alert('Please add at least one keyword of interest.');
+        keywordInput.focus();
+        return;
+      }
+
+      compileBtn.disabled = true;
+      compileBtn.textContent = 'Compiling with Gemma 4...';
+
+      const keywordSummary = keywords.map(k => `- ${k.text} (noted at ${k.time})`).join('\n');
+      const prompt = `You are an expert conference note-taker and tutor.
+The user attended a talk and noted down specific keywords/topics they found interesting, got confused by, or want to save for later.
+
+USER'S KEYWORDS:
+${keywordSummary}
+
+${transcript ? `TALK TRANSCRIPT:\n${transcript}\n` : '(Refer to the attached audio recording of the talk.)'}
+
+TASK:
+Compile a clean, well-structured Markdown study guide focused specifically on the user's keywords.
+For EACH keyword:
+1. Create a clear section heading with the keyword and timestamp.
+2. **What the speaker covered**: Summarize what was mentioned in the talk around that topic.
+3. **Clear explanation**: Explain the concept clearly in plain English so the user isn't lost anymore, filling in helpful background context.
+4. **Key takeaways / Follow-up**: 2-3 bullet points worth remembering or researching later.
+
+End with a brief 3-bullet overall summary of the talk.`;
+
+      const parts = [{ text: prompt }];
+      if (useAudio) {
+        const base64Audio = await blobToBase64(recordedAudioBlob);
+        parts.push({
+          inline_data: {
+            mime_type: recordedAudioBlob.type || 'audio/webm',
+            data: base64Audio
+          }
+        });
+      }
+
+      try {
+        const model = modelSelect.value;
+        const res = isServerMode
+          ? await fetch('/api/compile', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model, parts, apiKey })
+            })
+          : await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts }] })
+              }
+            );
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error?.message || `HTTP ${res.status}`);
+        }
+
+        const text = data.candidates?.[0]?.content?.parts?.map(p => p.text).join('\n') || 'No response generated.';
+        lastCompiledMarkdown = text;
+        notesOutput.innerHTML = marked.parse(text);
+        outputSection.classList.remove('hidden');
+        outputSection.scrollIntoView({ behavior: 'smooth' });
+      } catch (err) {
+        alert('Gemma 4 API error: ' + err.message);
+      } finally {
+        compileBtn.disabled = false;
+        compileBtn.textContent = 'Compile Notes with Gemma 4';
+      }
+    });
+
+    copyNotesBtn.addEventListener('click', async () => {
+      if (!lastCompiledMarkdown) return;
+      await navigator.clipboard.writeText(lastCompiledMarkdown);
+      copyNotesBtn.textContent = 'Copied!';
+      setTimeout(() => { copyNotesBtn.textContent = 'Copy Markdown'; }, 1500);
+    });
+  </script>
+</body>
+</html>
